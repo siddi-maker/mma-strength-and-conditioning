@@ -202,3 +202,34 @@ export function deloadDue(blockStart: string | undefined, today: string, everyWe
   const weeks = Math.floor(daysBetween(blockStart, today) / 7);
   return { due: weeks >= everyWeeks, weeks };
 }
+
+export interface LiftOptions {
+  /** Exercises with finished sessions, most recently trained first. */
+  logged: { exercise: Exercise; sessions: number; last: number }[];
+  /** In the active plan but not logged yet. */
+  inPlan: Exercise[];
+  /** Everything else in the exercise library. */
+  other: Exercise[];
+}
+
+/** Every exercise, grouped for the Charts picker. */
+export function liftOptions(exercises: Exercise[], workouts: Workout[], planExerciseIds: Set<string>): LiftOptions {
+  const stats = new Map<string, { sessions: number; last: number }>();
+  for (const w of workouts) {
+    if (w.status !== 'done') continue;
+    for (const e of w.exercises) {
+      if (e.skipped || !e.sets.some((s) => s.done)) continue;
+      const s = stats.get(e.exerciseId) ?? { sessions: 0, last: 0 };
+      stats.set(e.exerciseId, { sessions: s.sessions + 1, last: Math.max(s.last, w.startedAt) });
+    }
+  }
+  const byName = (a: Exercise, b: Exercise) => a.name.localeCompare(b.name);
+  return {
+    logged: exercises
+      .filter((e) => stats.has(e.id))
+      .map((exercise) => ({ exercise, ...stats.get(exercise.id)! }))
+      .sort((a, b) => b.last - a.last),
+    inPlan: exercises.filter((e) => !stats.has(e.id) && planExerciseIds.has(e.id)).sort(byName),
+    other: exercises.filter((e) => !stats.has(e.id) && !planExerciseIds.has(e.id)).sort(byName),
+  };
+}

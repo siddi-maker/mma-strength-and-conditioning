@@ -3,7 +3,8 @@ import { useLiveQuery } from 'dexie-react-hooks';
 import { Bar, BarChart, CartesianGrid, Legend, Line, LineChart, ReferenceArea, ResponsiveContainer, Scatter, ComposedChart, Tooltip, XAxis, YAxis } from 'recharts';
 import { db } from '../lib/db';
 import { addDays, shortDate, toISODate, weekStart } from '../lib/dates';
-import { epley, exerciseHistory, topWeight } from '../lib/progression';
+import { epley, exerciseHistory, liftOptions, topWeight } from '../lib/progression';
+import { getActivePlan, planTemplates } from '../lib/plans';
 import { movingAverage } from '../lib/weekly';
 import { Card, Page, SectionTitle, Segmented } from '../components/ui';
 import type { Exercise, Range } from '../lib/types';
@@ -27,25 +28,28 @@ const tooltip = {
 export default function Charts() {
   const [span, setSpan] = useState<Span>('90');
   const data = useLiveQuery(async () => {
-    const [workouts, checkins, activities, exercises, settings] = await Promise.all([
+    const plan = await getActivePlan();
+    const [workouts, checkins, activities, exercises, settings, planWorkouts] = await Promise.all([
       db.workouts.where('status').equals('done').sortBy('startedAt'),
       db.checkins.orderBy('date').toArray(),
       db.activities.toArray(),
       db.exercises.toArray(),
       db.settings.get('settings'),
+      plan ? planTemplates(plan.id) : [],
     ]);
-    return { workouts, checkins, activities, exercises, settings };
+    const planExerciseIds = new Set(planWorkouts.flatMap((t) => t.exercises.map((p) => p.exerciseId)));
+    return { workouts, checkins, activities, exercises, settings, planExerciseIds };
   }, []);
-  const [exId, setExId] = useState('bench');
+  const [picked, setPicked] = useState<string | null>(null);
+  const options = useMemo(() => (data ? liftOptions(data.exercises, data.workouts, data.planExerciseIds) : null), [data]);
+  // Default to the most recently trained lift.
+  const exId = picked ?? options?.logged[0]?.exercise.id ?? 'bench';
 
   const from = span === 'all' ? '0000-00-00' : addDays(toISODate(), -Number(span));
 
   const derived = useMemo(() => {
     if (!data) return null;
-    const { workouts, checkins, activities, exercises } = data;
-    const logged = new Set(workouts.flatMap((w) => w.exercises.filter((e) => !e.skipped && e.sets.some((s) => s.done)).map((e) => e.exerciseId)));
-    const exList = exercises.filter((e) => logged.has(e.id)).sort((a, b) => a.name.localeCompare(b.name));
-
+    const { workouts, checkins, activities } = data;
     const lift = exerciseHistory(workouts, exId)
       .reverse()
       .filter((h) => h.date >= from)
@@ -74,7 +78,7 @@ export default function Charts() {
       if (a.type === 'zone2') w.z2 += a.durationMin ?? 0;
     }
     const weekly = [...weeks.entries()].map(([k, v]) => ({ week: shortDate(k), ...v }));
-    return { exList, lift, bw, bf, daily, weekly };
+    return { lift, bw, bf, daily, weekly };
   }, [data, exId, from, span]);
 
   if (!data || !derived) return null;
@@ -95,13 +99,34 @@ export default function Charts() {
 
       <Card>
         <SectionTitle>Lifts</SectionTitle>
-        <select value={exId} onChange={(e) => setExId(e.target.value)} className="mb-3 h-12 w-full rounded-xl bg-neutral-800 px-3 outline-none">
-          {!derived.exList.some((e) => e.id === exId) && <option value={exId}>{ex?.name ?? exId}</option>}
-          {derived.exList.map((e) => (
-            <option key={e.id} value={e.id}>
-              {e.name}
-            </option>
-          ))}
+        <select aria-label="Lift" value={exId} onChange={(e) => setPicked(e.target.value)} className="mb-3 h-12 w-full rounded-xl bg-neutral-800 px-3 outline-none">
+          {options && options.logged.length > 0 && (
+            <optgroup label="Your lifts (most recent first)">
+              {options.logged.map(({ exercise, sessions }) => (
+                <option key={exercise.id} value={exercise.id}>
+                  {exercise.name} · {sessions} session{sessions === 1 ? '' : 's'}
+                </option>
+              ))}
+            </optgroup>
+          )}
+          {options && options.inPlan.length > 0 && (
+            <optgroup label="In your plan — not logged yet">
+              {options.inPlan.map((e) => (
+                <option key={e.id} value={e.id}>
+                  {e.name}
+                </option>
+              ))}
+            </optgroup>
+          )}
+          {options && options.other.length > 0 && (
+            <optgroup label="Other exercises">
+              {options.other.map((e) => (
+                <option key={e.id} value={e.id}>
+                  {e.name}
+                </option>
+              ))}
+            </optgroup>
+          )}
         </select>
         {derived.lift.length ? (
           <>
@@ -141,7 +166,7 @@ export default function Charts() {
             )}
           </>
         ) : (
-          <Empty>Log a session of this exercise to see trends.</Empty>
+          <Empty>{ex ? `No finished sessions of ${ex.name} ${span === 'all' ? 'yet' : 'in this period'}.` : 'No data yet.'} Charts update when you tap Finish workout.</Empty>
         )}
       </Card>
 

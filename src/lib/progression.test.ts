@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { deloadDue, deloadSets, epley, exerciseHistory, nextTemplateId, roundTo, suggest, type SessionEntry } from './progression';
+import { deloadDue, deloadSets, epley, exerciseHistory, liftOptions, nextTemplateId, roundTo, suggest, type SessionEntry } from './progression';
 import { SEED_EXERCISES, SEED_TEMPLATES } from './seed';
 import type { Exercise, Prescription, SetLog, Workout } from './types';
 
@@ -176,5 +176,26 @@ describe('rotation and deload', () => {
     expect(deloadSets(4)).toBe(2);
     expect(deloadSets(3)).toBe(2);
     expect(deloadSets(1)).toBe(1);
+  });
+});
+
+describe('liftOptions (Charts picker)', () => {
+  const rx = rxOf('bench');
+  const w = (startedAt: number, ids: string[], status: Workout['status'] = 'done', skipped = false): Workout => ({
+    templateId: 'x',
+    templateName: 'x',
+    startedAt,
+    status,
+    exercises: ids.map((exerciseId) => ({ exerciseId, target: rx, skipped, sets: [{ weight: 50, reps: 5, done: true }] })),
+  });
+  it('lists every exercise: logged (most recent first), then plan, then the rest', () => {
+    const o = liftOptions(SEED_EXERCISES, [w(1, ['bench', 'squat']), w(2, ['squat']), w(3, ['deadlift'], 'active'), w(4, ['rdl'], 'done', true)], new Set(['bench', 'squat', 'pullup']));
+    expect(o.logged.map((l) => [l.exercise.id, l.sessions])).toEqual([
+      ['squat', 2],
+      ['bench', 1],
+    ]);
+    expect(o.inPlan.map((e) => e.id)).toEqual(['pullup']);
+    expect(o.other).toHaveLength(SEED_EXERCISES.length - 3);
+    expect(o.other.some((e) => e.id === 'deadlift')).toBe(true); // only in an unfinished workout
   });
 });

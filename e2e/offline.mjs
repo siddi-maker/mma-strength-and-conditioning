@@ -95,6 +95,11 @@ try {
 
   await page.getByRole('link', { name: 'Charts' }).click();
   await page.getByText('Top set & estimated 1RM').waitFor();
+  const liftOpts = await page.getByRole('combobox', { name: 'Lift' }).locator('option').allInnerTexts();
+  check(liftOpts.length >= 31 && liftOpts[0].startsWith('Bench Press · 1 session') && liftOpts.includes('Back Squat'), `lift picker lists every exercise (${liftOpts.length}), logged first`);
+  await page.getByRole('combobox', { name: 'Lift' }).selectOption({ label: 'Back Squat' });
+  check(await page.getByText(/No finished sessions of Back Squat/).isVisible(), 'unlogged lift shows a clear empty state');
+  await page.getByRole('combobox', { name: 'Lift' }).selectOption({ index: 0 });
   await page.waitForTimeout(800);
   await snap('09-charts');
 
