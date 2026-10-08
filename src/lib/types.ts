@@ -107,6 +107,8 @@ export interface CheckIn {
   electrolytes?: boolean;
   phoneOff?: boolean;
   caffeineBefore2?: boolean;
+  /** Fields last filled by Fitbit sync (so a later sync may refresh them, but never overwrite manual entries). */
+  synced?: (keyof CheckIn)[];
 }
 
 export type ActivityType =
@@ -137,6 +139,9 @@ export interface Activity {
   beepLevel?: number;
   notes?: string;
   createdAt: number;
+  /** Set for entries imported from Google Health / Fitbit; used to avoid duplicates. */
+  externalId?: string;
+  source?: 'fitbit';
 }
 
 export interface Range {
@@ -196,4 +201,13 @@ export interface Settings {
   deloadUntil?: string;
   sound: boolean;
   vibrate: boolean;
+  google?: GoogleSync;
+}
+
+export interface GoogleSync {
+  /** OAuth client ID from the user's own Google Cloud project. */
+  clientId?: string;
+  /** Timestamp of the last successful sync. */
+  lastSync?: number;
+  lastResult?: string;
 }

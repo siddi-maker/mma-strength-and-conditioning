@@ -2,14 +2,19 @@ import { useRef, useState } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { db, saveSettings } from '../lib/db';
 import { toISODate } from '../lib/dates';
+import { useRoute } from '../lib/route';
 import { clearAllData, download, exportJSON, importJSON, setsCSV, toCSV, workoutsCSV } from '../lib/backup';
 import { Button, Card, NumberField, Page, SectionTitle, Toggle, cx } from '../components/ui';
+import { clearToken, getToken, redirectUri } from '../lib/googleHealth';
+import { syncNow, useFitbitSync } from '../lib/fitbitSync';
+import { FitbitStatus } from '../components/FitbitCard';
 import type { Exercise, Prescription, Range, Settings, Template } from '../lib/types';
 
-type Tab = 'templates' | 'exercises' | 'targets' | 'goals' | 'training' | 'data';
+type Tab = 'templates' | 'exercises' | 'targets' | 'goals' | 'training' | 'fitbit' | 'data';
 
 export default function SettingsPage() {
-  const [tab, setTab] = useState<Tab>('templates');
+  const { params } = useRoute();
+  const [tab, setTab] = useState<Tab>((params.get('tab') as Tab) || 'templates');
   const settings = useLiveQuery(() => db.settings.get('settings'));
   const tabs: { id: Tab; label: string }[] = [
     { id: 'templates', label: 'Templates' },
@@ -17,6 +22,7 @@ export default function SettingsPage() {
     { id: 'targets', label: 'Targets' },
     { id: 'goals', label: 'Goals' },
     { id: 'training', label: 'Training' },
+    { id: 'fitbit', label: 'Fitbit' },
     { id: 'data', label: 'Data' },
   ];
   return (
@@ -33,6 +39,7 @@ export default function SettingsPage() {
       {settings && tab === 'targets' && <TargetsEditor s={settings} />}
       {settings && tab === 'goals' && <GoalsEditor s={settings} />}
       {settings && tab === 'training' && <TrainingEditor s={settings} />}
+      {settings && tab === 'fitbit' && <FitbitSettings s={settings} />}
       {tab === 'data' && <DataTools />}
     </Page>
   );
@@ -334,6 +341,66 @@ function TrainingEditor({ s }: { s: Settings }) {
       )}
       <p className="text-xs text-neutral-500">Units: kg, metres, litres.</p>
     </Card>
+  );
+}
+
+// ------------------------------------------------------------ Fitbit
+
+function FitbitSettings({ s }: { s: Settings }) {
+  const sync = useFitbitSync();
+  const [copied, setCopied] = useState(false);
+  const clientId = s.google?.clientId ?? '';
+  const uri = redirectUri();
+  const origin = window.location.origin;
+  return (
+    <>
+      <Card className="flex flex-col gap-3">
+        <SectionTitle>Fitbit via Google Health</SectionTitle>
+        <p className="text-sm text-neutral-300">
+          Pulls <b>sleep</b> (into check-ins), <b>bodyweight &amp; body fat</b>, and <b>runs</b> (as Zone 2 entries) from your Fitbit through your Google account. Values you typed yourself are never
+          overwritten.
+        </p>
+        <TextField label="Google OAuth client ID" value={clientId} onChange={(v) => saveSettings({ google: { ...s.google, clientId: v.trim() || undefined } })} />
+        <Button variant="primary" className="h-14 text-lg" disabled={!clientId || sync.status === 'syncing'} onClick={() => syncNow('#/settings?tab=fitbit')}>
+          {getToken() ? 'Sync now' : s.google?.lastSync ? 'Sync now (sign in)' : 'Connect Google & sync'}
+        </Button>
+        <FitbitStatus s={s} />
+        {getToken() && (
+          <Button
+            variant="ghost"
+            onClick={() => {
+              clearToken();
+              location.reload();
+            }}
+          >
+            Sign out of Google
+          </Button>
+        )}
+      </Card>
+      <Card className="flex flex-col gap-2 text-sm">
+        <SectionTitle>Your app's addresses (for Google Cloud setup)</SectionTitle>
+        <div>
+          <div className="text-xs text-neutral-400">Authorized JavaScript origin</div>
+          <code className="break-all">{origin}</code>
+        </div>
+        <div>
+          <div className="text-xs text-neutral-400">Authorized redirect URI</div>
+          <code className="break-all">{uri}</code>
+        </div>
+        <Button
+          onClick={async () => {
+            await navigator.clipboard?.writeText(uri);
+            setCopied(true);
+          }}
+        >
+          {copied ? 'Copied ✓' : 'Copy redirect URI'}
+        </Button>
+        <p className="text-neutral-400">
+          Sync runs when you tap it, and automatically when you open the app while still signed in (Google sign-ins last about an hour). Runs are recorded as RUNNING, TREADMILL, TRAIL_RUN or
+          INCLINE_RUN in Fitbit.
+        </p>
+      </Card>
+    </>
   );
 }
 

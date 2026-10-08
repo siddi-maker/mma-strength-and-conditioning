@@ -2,7 +2,9 @@ name: Deploy to GitHub Pages
 
 on:
   push:
-    branches: [main]
+    # The repo's default branch is currently the claude/ branch, which GitHub Pages' environment
+    # rule allows; main is listed so deploys keep working once the default is switched to main.
+    branches: [main, claude/mma-training-tracker-ad8uo2]
   workflow_dispatch:
 
 permissions:

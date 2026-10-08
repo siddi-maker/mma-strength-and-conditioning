@@ -3,24 +3,27 @@ import { useSyncExternalStore } from 'react';
 /** Minimal hash router: works on any static host (GitHub Pages) with no server rewrites. */
 export type Route = { path: string; params: URLSearchParams };
 
-function read(): Route {
-  const raw = window.location.hash.replace(/^#/, '') || '/';
-  const [path, query = ''] = raw.split('?');
-  return { path, params: new URLSearchParams(query) };
+let raw = '';
+let current: Route = { path: '/', params: new URLSearchParams() };
+
+// Read lazily (not at import) so the OAuth redirect handler can rewrite the hash first.
+function snapshot(): Route {
+  const h = window.location.hash;
+  if (h !== raw) {
+    raw = h;
+    const [path, query = ''] = (h.replace(/^#/, '') || '/').split('?');
+    current = { path, params: new URLSearchParams(query) };
+  }
+  return current;
 }
 
-let current = read();
 const subscribe = (cb: () => void) => {
-  const h = () => {
-    current = read();
-    cb();
-  };
-  window.addEventListener('hashchange', h);
-  return () => window.removeEventListener('hashchange', h);
+  window.addEventListener('hashchange', cb);
+  return () => window.removeEventListener('hashchange', cb);
 };
 
 export function useRoute(): Route {
-  return useSyncExternalStore(subscribe, () => current);
+  return useSyncExternalStore(subscribe, snapshot);
 }
 
 export function navigate(to: string) {

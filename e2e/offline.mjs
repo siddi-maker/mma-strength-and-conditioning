@@ -98,6 +98,50 @@ try {
   await page.waitForTimeout(800);
   await snap('09-charts');
 
+  // --- Fitbit (Google Health) connect + sync, with Google faked at the network layer
+  await page.goto(URL_ + '#/settings');
+  await page.getByRole('button', { name: 'Fitbit' }).click();
+  await page.locator('label:has-text("Google OAuth client ID") input').fill('test-client.apps.googleusercontent.com');
+  await page.locator('label:has-text("Google OAuth client ID") input').blur();
+  let authUrl;
+  await page.route('https://accounts.google.com/**', async (route) => {
+    authUrl = new URL(route.request().url());
+    // Behave like Google: bounce straight back with a token in the fragment.
+    const back = `${authUrl.searchParams.get('redirect_uri')}#access_token=fake-token&token_type=Bearer&expires_in=3599&state=${authUrl.searchParams.get('state')}`;
+    await route.fulfill({ status: 302, headers: { location: back } });
+  });
+  const yd = new Date(Date.now() - 86400000);
+  const civ = { date: { year: yd.getFullYear(), month: yd.getMonth() + 1, day: yd.getDate() }, time: { hours: 7, minutes: 5 } };
+  const healthHits = [];
+  await page.route('https://health.googleapis.com/**', async (route) => {
+    const url = route.request().url();
+    healthHits.push(url);
+    const type = url.split('/dataTypes/')[1].split('/')[0];
+    const body = {
+      sleep: { dataPoints: [{ sleep: { interval: { startTime: yd.toISOString(), endTime: yd.toISOString(), civilStartTime: { ...civ, time: { hours: 23, minutes: 20 } }, civilEndTime: civ }, summary: { minutesAsleep: '450' }, metadata: { mainSleep: true } } }] },
+      weight: { dataPoints: [{ weight: { sampleTime: { physicalTime: yd.toISOString(), civilTime: civ }, weightGrams: 77600 } }] },
+      'body-fat': {},
+      exercise: { dataPoints: [{ name: 'run-e2e', exercise: { exerciseType: 'RUNNING', activeDuration: '2280s', interval: { startTime: yd.toISOString(), endTime: yd.toISOString(), civilStartTime: civ }, metricsSummary: { distanceMillimeters: 5600000, averageHeartRateBeatsPerMinute: '138' } } }] },
+    }[type];
+    await route.fulfill({ status: 200, contentType: 'application/json', headers: { 'access-control-allow-origin': '*' }, body: JSON.stringify(body ?? {}) });
+  });
+  await page.getByRole('button', { name: 'Connect Google & sync' }).click();
+  await page.getByText(/Updated 1 night of sleep, 1 weigh-in, 1 run/).waitFor({ timeout: 10000 });
+  check(authUrl?.searchParams.get('response_type') === 'token' && authUrl.searchParams.get('scope').includes('googlehealth.sleep.readonly'), 'Connect sends the right OAuth request');
+  check(page.url().endsWith('#/settings?tab=fitbit'), `returns to the Fitbit tab with token stripped from the URL (${page.url().split('/').pop()})`);
+  check(healthHits.length === 4, 'queried sleep, weight, body fat and exercise');
+  await snap('10-fitbit');
+  await page.getByRole('link', { name: 'Check-in' }).click();
+  await page.getByRole('button', { name: 'previous day' }).click();
+  await page.waitForFunction(() => [...document.querySelectorAll('label')].some((l) => l.textContent.includes('Bodyweight') && l.querySelector('input')?.value));
+  const sleepVal = await page.locator('label:has-text("Sleep") input').first().inputValue();
+  const bwVal = await page.locator('label:has-text("Bodyweight") input').first().inputValue();
+  check(sleepVal === '7.5' && bwVal === '77.6', `Fitbit sleep & weight landed in yesterday's check-in (sleep=${sleepVal}, bw=${bwVal})`);
+  await page.getByRole('link', { name: 'Cardio/MA' }).click();
+  check(await page.getByText(/Zone 2 · 38 min · 5.6 km · 138 bpm/).waitFor({ timeout: 5000 }).then(() => true, () => false), 'Fitbit run imported as Zone 2');
+  await page.unroute('https://accounts.google.com/**');
+  await page.unroute('https://health.googleapis.com/**');
+
   // --- PWA installability + offline
   const manifest = await page.evaluate(async () => {
     const href = document.querySelector('link[rel=manifest]')?.getAttribute('href');

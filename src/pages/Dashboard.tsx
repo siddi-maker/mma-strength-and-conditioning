@@ -8,6 +8,7 @@ import { isDeloadActive, startDeloadWeek } from '../lib/workout';
 import { navigate } from '../lib/route';
 import { Bar, Button, Card, Page, Ring, SectionTitle, cx, fmt } from '../components/ui';
 import type { Range } from '../lib/types';
+import { FitbitCard } from '../components/FitbitCard';
 
 export default function Dashboard() {
   const data = useLiveQuery(async () => {
@@ -80,6 +81,8 @@ export default function Dashboard() {
           )
         )}
       </Card>
+
+      <FitbitCard />
 
       <Card>
         <SectionTitle right={<a href="#/checkin" className="text-sm font-semibold text-red-400">Check in →</a>}>Today's fuel</SectionTitle>

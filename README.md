@@ -16,6 +16,7 @@ A phone-first training log for strength, conditioning and martial arts. It's an 
 - **Daily check-in.** Bodyweight, sleep (worked out from bed and wake times), macros, water, supplement and habit toggles, and quick-add buttons.
 - **Dashboard.** Today's macro rings, this week vs targets, the goal matrix, adherence %, streaks and a training heatmap.
 - **Charts.** Top set and e1RM, volume, bodyweight with a 7-day average, body fat, sleep and protein against their target bands, and weekly martial arts and Zone 2.
+- **Fitbit sync.** Sleep, weight, body fat and runs come in through the Google Health API (see below).
 - **Settings.** Edit templates, exercises (increment, starting weight, rule), targets, goals and the deload interval. Export/import a full JSON backup, export per-table CSV, and clear all data.
 
 ## Develop
@@ -48,6 +49,23 @@ The app has to be served over HTTPS (both options above are). Open it once while
 - **Android (Chrome):** open the URL, tap **⋮ → Install app** (or accept the install banner).
 
 After that it works with no signal. Updates install automatically the next time you open it online.
+
+## Fitbit sync (Google Health API)
+
+Settings → **Fitbit** pulls **sleep** (hours, bed and wake time into check-ins), **bodyweight and body fat**, and **runs** (as Zone 2 entries with duration, distance and average HR) from Fitbit through the Google Health API, which replaced the legacy Fitbit Web API (shut down 30 Oct 2026). Values you typed yourself are never overwritten. The first sync looks back 30 days.
+
+It runs in the browser with no backend: Google sign-in returns a ~1 hour token. The app syncs when you tap **Sync**, or automatically on open while that token is still valid.
+
+One-time setup in your own Google Cloud project:
+1. Go to console.cloud.google.com and create a project.
+2. **APIs & Services → Library**: enable **Google Health API**.
+3. **Google Auth Platform** (OAuth consent screen): create it with **Audience: External**. Under **Audience → Test users**, add your Google account. Under **Data Access**, add the scopes `googlehealth.sleep.readonly`, `googlehealth.health_metrics_and_measurements.readonly` and `googlehealth.activity_and_fitness.readonly`.
+4. **Clients → Create client → Web application**:
+   - Authorized JavaScript origin: `https://<user>.github.io`
+   - Authorized redirect URI: `https://<user>.github.io/<repo>/` (shown in the app under Settings → Fitbit)
+5. Paste the client ID into Settings → Fitbit and tap **Connect Google & sync**. Google warns that the app is unverified; that's expected for a personal app. Tap *Continue*.
+
+Your Fitbit has to be linked to the same Google account.
 
 ## Your data
 
