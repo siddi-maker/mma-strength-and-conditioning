@@ -10,7 +10,22 @@ import './index.css';
 // Must run before the hash router reads the URL: Google returns the token in the fragment.
 const auth = consumeAuthRedirect();
 
-registerSW({ immediate: true });
+// Auto-update: the new service worker activates and the page reloads itself. Browsers only
+// look for a new version on a fresh launch, so also check whenever the app comes back to the
+// foreground and hourly while open. All data lives in IndexedDB, so the reload loses nothing.
+registerSW({
+  immediate: true,
+  onRegisteredSW(_url, reg) {
+    if (!reg) return;
+    const check = () => {
+      if (navigator.onLine) reg.update().catch(() => undefined);
+    };
+    setInterval(check, 60 * 60 * 1000);
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible') check();
+    });
+  },
+});
 void requestPersistentStorage();
 
 createRoot(document.getElementById('root')!).render(

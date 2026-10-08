@@ -48,7 +48,7 @@ The app has to be served over HTTPS (both options above are). Open it once while
 - **iPhone (Safari):** open the URL, tap **Share → Add to Home Screen → Add**. Launch it from the home-screen icon; it runs full screen and offline.
 - **Android (Chrome):** open the URL, tap **⋮ → Install app** (or accept the install banner).
 
-After that it works with no signal. Updates install automatically the next time you open it online.
+After that it works with no signal. Updates install automatically: the app checks for a new version whenever you switch back to it (and hourly while open) and reloads itself. Your data is unaffected. The build date is shown at the bottom of Settings → Data.
 
 ## Fitbit sync (Google Health API)
 

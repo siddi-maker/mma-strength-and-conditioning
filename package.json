@@ -9,7 +9,7 @@
     "preview": "vite preview",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:e2e": "node e2e/offline.mjs",
+    "test:e2e": "node e2e/offline.mjs && node e2e/update.mjs",
     "typecheck": "tsc --noEmit -p ."
   },
   "dependencies": {

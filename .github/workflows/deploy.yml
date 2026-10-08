@@ -2,8 +2,6 @@ name: Deploy to GitHub Pages
 
 on:
   push:
-    # The repo's default branch is currently the claude/ branch, which GitHub Pages' environment
-    # rule allows; main is listed so deploys keep working once the default is switched to main.
     branches: [main, claude/mma-training-tracker-ad8uo2]
   workflow_dispatch:
 
@@ -12,8 +10,9 @@ permissions:
   pages: write
   id-token: write
 
+# One queue per branch, so pushing the same commit to two branches can't cancel the deploy.
 concurrency:
-  group: pages
+  group: pages-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -34,6 +33,8 @@ jobs:
         with:
           path: dist
   deploy:
+    # GitHub Pages only accepts deploys from the repo's default branch; other branches just build and test.
+    if: github.ref_name == github.event.repository.default_branch
     needs: build
     runs-on: ubuntu-latest
     environment:

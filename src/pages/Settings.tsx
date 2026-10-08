@@ -471,6 +471,9 @@ function DataTools() {
           Clear all data
         </Button>
       </Card>
+      <p className="text-center text-xs text-neutral-500">
+        App version: {new Date(__BUILD_TIME__).toLocaleString()} · updates install automatically
+      </p>
     </>
   );
 }
