@@ -1,0 +1,7 @@
+node_modules
+dist
+dev-dist
+*.log
+.DS_Store
+e2e/screenshots
+*.tsbuildinfo
