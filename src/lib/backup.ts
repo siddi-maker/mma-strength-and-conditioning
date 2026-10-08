@@ -1,11 +1,14 @@
 import { db } from './db';
 import { toISODate } from './dates';
-import type { Activity, CheckIn, Exercise, Settings, Template, Workout } from './types';
+import { SEED_PROGRAM } from './seed';
+import type { Activity, CheckIn, Exercise, Program, Settings, Template, Workout } from './types';
 
 export interface Backup {
   app: 'mma-tracker';
-  version: 1;
+  version: 1 | 2;
   exportedAt: string;
+  /** Added in version 2. Version 1 backups predate plans. */
+  programs?: Program[];
   exercises: Exercise[];
   templates: Template[];
   workouts: Workout[];
@@ -15,7 +18,8 @@ export interface Backup {
 }
 
 export async function exportJSON(): Promise<Backup> {
-  const [exercises, templates, workouts, checkins, activities, settings] = await Promise.all([
+  const [programs, exercises, templates, workouts, checkins, activities, settings] = await Promise.all([
+    db.programs.toArray(),
     db.exercises.toArray(),
     db.templates.toArray(),
     db.workouts.toArray(),
@@ -23,7 +27,7 @@ export async function exportJSON(): Promise<Backup> {
     db.activities.toArray(),
     db.settings.toArray(),
   ]);
-  return { app: 'mma-tracker', version: 1, exportedAt: new Date().toISOString(), exercises, templates, workouts, checkins, activities, settings };
+  return { app: 'mma-tracker', version: 2, exportedAt: new Date().toISOString(), programs, exercises, templates, workouts, checkins, activities, settings };
 }
 
 export function validateBackup(data: unknown): data is Backup {
@@ -43,14 +47,20 @@ export function validateBackup(data: unknown): data is Backup {
 /** Replace everything with the backup contents (atomic). */
 export async function importJSON(data: unknown): Promise<void> {
   if (!validateBackup(data)) throw new Error('Not a valid tracker backup file');
-  await db.transaction('rw', [db.exercises, db.templates, db.workouts, db.checkins, db.activities, db.settings], async () => {
-    await Promise.all([db.exercises.clear(), db.templates.clear(), db.workouts.clear(), db.checkins.clear(), db.activities.clear(), db.settings.clear()]);
+  // Version 1 backups have no plans: put every workout into the default plan and make it active.
+  const programs = data.programs?.length ? data.programs : [SEED_PROGRAM];
+  const fallback = programs[0].id;
+  const templates = data.templates.map((t) => ({ ...t, programId: t.programId ?? fallback }));
+  const settings = data.settings.map((s) => ({ ...s, activeProgramId: programs.some((p) => p.id === s.activeProgramId) ? s.activeProgramId : fallback }));
+  await db.transaction('rw', [db.programs, db.exercises, db.templates, db.workouts, db.checkins, db.activities, db.settings], async () => {
+    await Promise.all([db.programs.clear(), db.exercises.clear(), db.templates.clear(), db.workouts.clear(), db.checkins.clear(), db.activities.clear(), db.settings.clear()]);
+    await db.programs.bulkPut(programs);
     await db.exercises.bulkPut(data.exercises);
-    await db.templates.bulkPut(data.templates);
+    await db.templates.bulkPut(templates);
     await db.workouts.bulkPut(data.workouts);
     await db.checkins.bulkPut(data.checkins);
     await db.activities.bulkPut(data.activities);
-    await db.settings.bulkPut(data.settings);
+    await db.settings.bulkPut(settings);
   });
 }
 

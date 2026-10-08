@@ -6,7 +6,7 @@ export type Route = { path: string; params: URLSearchParams };
 let raw = '';
 let current: Route = { path: '/', params: new URLSearchParams() };
 
-// Read lazily (not at import) so the OAuth redirect handler can rewrite the hash first.
+// Read lazily from the current hash on each render.
 function snapshot(): Route {
   const h = window.location.hash;
   if (h !== raw) {

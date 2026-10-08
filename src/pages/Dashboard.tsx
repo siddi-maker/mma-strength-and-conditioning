@@ -1,40 +1,37 @@
 import { useLiveQuery } from 'dexie-react-hooks';
 import { db } from '../lib/db';
 import { addDays, toISODate, weekStart } from '../lib/dates';
-import { deloadDue, nextTemplateId } from '../lib/progression';
+import { deloadDue } from '../lib/progression';
+import { getActivePlan, nextInPlan, planTemplates } from '../lib/plans';
 import { adherence, checkinStreak, rangeStatus, weekSummary } from '../lib/weekly';
 import { goalCurrent, goalMet, goalProgress } from '../lib/goals';
 import { isDeloadActive, startDeloadWeek } from '../lib/workout';
 import { navigate } from '../lib/route';
 import { Bar, Button, Card, Page, Ring, SectionTitle, cx, fmt } from '../components/ui';
 import type { Range } from '../lib/types';
-import { FitbitCard } from '../components/FitbitCard';
 
 export default function Dashboard() {
   const data = useLiveQuery(async () => {
+    const plan = await getActivePlan();
     const [settings, templates, workouts, checkins, activities] = await Promise.all([
       db.settings.get('settings'),
-      db.templates.orderBy('order').toArray(),
+      plan ? planTemplates(plan.id) : [],
       db.workouts.toArray(),
       db.checkins.toArray(),
       db.activities.toArray(),
     ]);
-    return { settings, templates, workouts, checkins, activities };
+    return { plan, settings, templates, workouts, checkins, activities };
   }, []);
   if (!data?.settings) return null;
-  const { settings, templates, workouts, checkins, activities } = data;
+  const { plan, settings, templates, workouts, checkins, activities } = data;
   const today = toISODate();
-  const done = workouts.filter((w) => w.status === 'done').sort((a, b) => a.startedAt - b.startedAt);
   const active = workouts.find((w) => w.status === 'active');
-  const nextId = nextTemplateId(
-    templates.map((t) => t.id),
-    done[done.length - 1]?.templateId,
-  );
-  const next = templates.find((t) => t.id === nextId);
+  const next = nextInPlan(templates, workouts);
+  const perWeek = plan?.sessionsPerWeek ?? 4;
   const ci = checkins.find((c) => c.date === today);
   const T = settings.targets;
   const week = weekSummary(weekStart(today), checkins, activities, workouts);
-  const adh = adherence(workouts, T.weekly.weightSessions, today);
+  const adh = adherence(workouts, perWeek, today);
   const deload = deloadDue(settings.blockStart, today, settings.deloadEveryWeeks);
   const inDeload = isDeloadActive(settings.deloadUntil, today);
 
@@ -61,13 +58,25 @@ export default function Dashboard() {
       )}
 
       <Card>
-        <SectionTitle>Next workout</SectionTitle>
+        <SectionTitle
+          right={
+            <a href="#/settings?tab=plans" className="text-sm font-semibold text-red-400">
+              {plan?.name ?? 'Plans'} →
+            </a>
+          }
+        >
+          Next workout
+        </SectionTitle>
         {active ? (
           <Button variant="primary" className="h-14 w-full text-lg" onClick={() => navigate('/train')}>
             Resume {active.templateName}
           </Button>
         ) : (
-          next && (
+          !next ? (
+            <Button className="w-full" onClick={() => navigate('/settings?tab=plans')}>
+              Add workouts to {plan?.name ?? 'your plan'}
+            </Button>
+          ) : (
             <div className="flex items-center justify-between gap-3">
               <div>
                 <div className="text-xl font-bold">{next.name}</div>
@@ -81,8 +90,6 @@ export default function Dashboard() {
           )
         )}
       </Card>
-
-      <FitbitCard />
 
       <Card>
         <SectionTitle right={<a href="#/checkin" className="text-sm font-semibold text-red-400">Check in →</a>}>Today's fuel</SectionTitle>
@@ -104,7 +111,7 @@ export default function Dashboard() {
           <WeekRow label="Zone 2" unit="min" value={week.zone2Min} range={T.weekly.zone2Min} />
           <WeekRow label="Sprint sessions" value={week.sprintSessions} range={{ min: T.weekly.sprintSessions, max: Infinity }} />
           <WeekRow label="Martial arts" value={week.maSessions} range={T.weekly.maSessions} />
-          <WeekRow label="Weight sessions" value={week.weightSessions} range={{ min: T.weekly.weightSessions, max: Infinity }} />
+          <WeekRow label="Weight sessions" value={week.weightSessions} range={{ min: perWeek, max: Infinity }} />
         </div>
       </Card>
 

@@ -2,11 +2,12 @@ import { useEffect, useMemo, useState } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { db, finishedWorkouts } from '../lib/db';
 import { toISODate, formatDuration, formatClock, shortDate } from '../lib/dates';
-import { exerciseHistory, nextTemplateId, suggest, type SessionEntry, type Suggestion } from '../lib/progression';
+import { exerciseHistory, suggest, type SessionEntry, type Suggestion } from '../lib/progression';
 import { detectPRs, workoutVolume } from '../lib/prs';
 import { isDeloadActive, setsFromSuggestion, startWorkout } from '../lib/workout';
 import { startRest, stopRest, unlockAudio } from '../lib/timer';
 import { navigate } from '../lib/route';
+import { nextInPlan, useActivePlan } from '../lib/plans';
 import { Button, Card, Page, Stepper, cx, fmt } from '../components/ui';
 import type { Exercise, ExerciseLog, SetLog, Template, Workout } from '../lib/types';
 
@@ -23,18 +24,24 @@ export default function Train() {
 // ---------------------------------------------------------------- Start
 
 function StartScreen() {
-  const templates = useLiveQuery(() => db.templates.orderBy('order').toArray(), []);
-  const last = useLiveQuery(() => db.workouts.where('status').equals('done').reverse().sortBy('startedAt').then((w) => w[0]), []);
+  const active = useActivePlan();
+  const done = useLiveQuery(() => db.workouts.where('status').equals('done').toArray(), []);
   const settings = useLiveQuery(() => db.settings.get('settings'));
-  if (!templates) return null;
-  const nextId = nextTemplateId(
-    templates.map((t) => t.id),
-    last?.templateId,
-  );
+  if (!active || !done) return null;
+  const { plan, templates } = active;
+  const nextId = nextInPlan(templates, done)?.id;
+  const last = [...done].sort((a, b) => b.startedAt - a.startedAt)[0];
   const deload = isDeloadActive(settings?.deloadUntil);
 
   return (
-    <Page title="Start workout">
+    <Page
+      title="Start workout"
+      right={
+        <a href="#/settings?tab=plans" className="max-w-[45%] truncate rounded-xl bg-neutral-900 px-3 py-3 text-sm font-semibold text-neutral-300 active:bg-neutral-800">
+          {plan?.name ?? 'Plans'} ▾
+        </a>
+      }
+    >
       {deload && <div className="rounded-xl bg-amber-900/40 p-3 text-sm text-amber-200">Deload week — sets are cut to ~60% volume until {settings?.deloadUntil}.</div>}
       {last && (
         <p className="text-sm text-neutral-400">
@@ -45,6 +52,11 @@ function StartScreen() {
         {templates.map((t) => (
           <TemplateButton key={t.id} t={t} suggested={t.id === nextId} />
         ))}
+        {!templates.length && (
+          <Button variant="primary" className="h-14" onClick={() => navigate('/settings?tab=plans')}>
+            {plan?.name ?? 'This plan'} has no workouts yet — add some
+          </Button>
+        )}
       </div>
     </Page>
   );

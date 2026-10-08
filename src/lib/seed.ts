@@ -1,4 +1,4 @@
-import type { Exercise, Goal, Prescription, Settings, Template } from './types';
+import type { Exercise, Goal, Prescription, Program, Settings, Template } from './types';
 
 const ex = (
   id: string,
@@ -58,9 +58,12 @@ const p = (
   extra: Partial<Prescription> = {},
 ): Prescription => ({ exerciseId, sets, repsMin, repsMax, restSec, restMaxSec, ...extra });
 
+export const SEED_PROGRAM: Program = { id: 'default', name: 'MMA S&C (4-day)', sessionsPerWeek: 4, createdAt: 0 };
+
 export const SEED_TEMPLATES: Template[] = [
   {
     id: 'upper_a',
+    programId: 'default',
     name: 'Upper A',
     order: 0,
     conditioning: { kind: 'zone2', label: 'Zone 2 run 30–40 min' },
@@ -80,6 +83,7 @@ export const SEED_TEMPLATES: Template[] = [
   },
   {
     id: 'lower_a',
+    programId: 'default',
     name: 'Lower A',
     order: 1,
     conditioning: { kind: 'intervals', label: 'Bike/rower: 10 × 20 s hard / 100 s easy' },
@@ -94,6 +98,7 @@ export const SEED_TEMPLATES: Template[] = [
   },
   {
     id: 'upper_b',
+    programId: 'default',
     name: 'Upper B',
     order: 2,
     conditioning: { kind: 'zone2', label: 'Zone 2 run 30–40 min' },
@@ -112,6 +117,7 @@ export const SEED_TEMPLATES: Template[] = [
   },
   {
     id: 'lower_b',
+    programId: 'default',
     name: 'Lower B',
     order: 3,
     conditioning: { kind: 'sprints', label: 'Sprints 6 × 100 m, 90–120 s rest' },
@@ -149,6 +155,7 @@ export const SEED_GOALS: Goal[] = [
 
 export const DEFAULT_SETTINGS: Settings = {
   id: 'settings',
+  activeProgramId: SEED_PROGRAM.id,
   targets: {
     daily: {
       protein: { min: 180, max: 200 },
@@ -164,7 +171,6 @@ export const DEFAULT_SETTINGS: Settings = {
       zone2Min: { min: 60, max: 80 },
       sprintSessions: 1,
       maSessions: { min: 4, max: 6 },
-      weightSessions: 4,
     },
   },
   goals: SEED_GOALS,

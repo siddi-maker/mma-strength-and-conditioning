@@ -51,8 +51,19 @@ export interface Prescription {
 
 export type CardioKind = 'zone2' | 'intervals' | 'sprints';
 
+/** A training plan (regime): a rotation of workout templates. Exactly one is active. */
+export interface Program {
+  id: string;
+  name: string;
+  /** Weekly weight-session target used by the dashboard and adherence. */
+  sessionsPerWeek: number;
+  createdAt: number;
+}
+
 export interface Template {
   id: string;
+  /** The plan this workout belongs to. */
+  programId: string;
   name: string;
   order: number;
   exercises: Prescription[];
@@ -107,8 +118,6 @@ export interface CheckIn {
   electrolytes?: boolean;
   phoneOff?: boolean;
   caffeineBefore2?: boolean;
-  /** Fields last filled by Fitbit sync (so a later sync may refresh them, but never overwrite manual entries). */
-  synced?: (keyof CheckIn)[];
 }
 
 export type ActivityType =
@@ -139,9 +148,6 @@ export interface Activity {
   beepLevel?: number;
   notes?: string;
   createdAt: number;
-  /** Set for entries imported from Google Health / Fitbit; used to avoid duplicates. */
-  externalId?: string;
-  source?: 'fitbit';
 }
 
 export interface Range {
@@ -164,7 +170,8 @@ export interface Targets {
     zone2Min: Range;
     sprintSessions: number;
     maSessions: Range;
-    weightSessions: number;
+    /** @deprecated Superseded by Program.sessionsPerWeek; kept so old backups import cleanly. */
+    weightSessions?: number;
   };
 }
 
@@ -192,6 +199,8 @@ export interface Goal {
 
 export interface Settings {
   id: 'settings';
+  /** The plan the whole app is currently showing. */
+  activeProgramId?: string;
   targets: Targets;
   goals: Goal[];
   deloadEveryWeeks: number;
@@ -201,13 +210,4 @@ export interface Settings {
   deloadUntil?: string;
   sound: boolean;
   vibrate: boolean;
-  google?: GoogleSync;
-}
-
-export interface GoogleSync {
-  /** OAuth client ID from the user's own Google Cloud project. */
-  clientId?: string;
-  /** Timestamp of the last successful sync. */
-  lastSync?: number;
-  lastResult?: string;
 }

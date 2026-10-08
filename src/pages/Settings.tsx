@@ -1,28 +1,25 @@
 import { useRef, useState } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
-import { db, saveSettings } from '../lib/db';
+import { db, getSettings, saveSettings } from '../lib/db';
+import { addWorkout, createPlan, deletePlan, moveWorkout, setActivePlan } from '../lib/plans';
 import { toISODate } from '../lib/dates';
 import { useRoute } from '../lib/route';
 import { clearAllData, download, exportJSON, importJSON, setsCSV, toCSV, workoutsCSV } from '../lib/backup';
 import { Button, Card, NumberField, Page, SectionTitle, Toggle, cx } from '../components/ui';
-import { clearToken, getToken, redirectUri } from '../lib/googleHealth';
-import { syncNow, useFitbitSync } from '../lib/fitbitSync';
-import { FitbitStatus } from '../components/FitbitCard';
-import type { Exercise, Prescription, Range, Settings, Template } from '../lib/types';
+import type { Exercise, Prescription, Program, Range, Settings, Template } from '../lib/types';
 
-type Tab = 'templates' | 'exercises' | 'targets' | 'goals' | 'training' | 'fitbit' | 'data';
+type Tab = 'plans' | 'exercises' | 'targets' | 'goals' | 'training' | 'data';
 
 export default function SettingsPage() {
   const { params } = useRoute();
-  const [tab, setTab] = useState<Tab>((params.get('tab') as Tab) || 'templates');
+  const [tab, setTab] = useState<Tab>((params.get('tab') as Tab) || 'plans');
   const settings = useLiveQuery(() => db.settings.get('settings'));
   const tabs: { id: Tab; label: string }[] = [
-    { id: 'templates', label: 'Templates' },
+    { id: 'plans', label: 'Plans' },
     { id: 'exercises', label: 'Exercises' },
     { id: 'targets', label: 'Targets' },
     { id: 'goals', label: 'Goals' },
     { id: 'training', label: 'Training' },
-    { id: 'fitbit', label: 'Fitbit' },
     { id: 'data', label: 'Data' },
   ];
   return (
@@ -34,49 +31,181 @@ export default function SettingsPage() {
           </button>
         ))}
       </div>
-      {tab === 'templates' && <Templates />}
+      {tab === 'plans' && <Plans />}
       {tab === 'exercises' && <Exercises />}
       {settings && tab === 'targets' && <TargetsEditor s={settings} />}
       {settings && tab === 'goals' && <GoalsEditor s={settings} />}
       {settings && tab === 'training' && <TrainingEditor s={settings} />}
-      {settings && tab === 'fitbit' && <FitbitSettings s={settings} />}
       {tab === 'data' && <DataTools />}
     </Page>
   );
 }
 
-// ------------------------------------------------------------ Templates
+// ------------------------------------------------------------ Plans
 
-function Templates() {
-  const templates = useLiveQuery(() => db.templates.orderBy('order').toArray(), []);
-  const exercises = useLiveQuery(() => db.exercises.toArray(), []);
-  const [editing, setEditing] = useState<string | null>(null);
-  if (!templates || !exercises) return null;
+/** Settings → Plans: list of plans → plan editor → workout (template) editor. */
+function Plans() {
+  const data = useLiveQuery(async () => {
+    const [plans, templates, exercises, settings] = await Promise.all([db.programs.toArray(), db.templates.toArray(), db.exercises.toArray(), getSettings()]);
+    return { plans: plans.sort((a, b) => a.createdAt - b.createdAt), templates, exercises, activeId: settings.activeProgramId };
+  }, []);
+  const [planId, setPlanId] = useState<string | null>(null);
+  const [workoutId, setWorkoutId] = useState<string | null>(null);
+  const [creating, setCreating] = useState(false);
+  if (!data) return null;
+  const { plans, templates, exercises, activeId } = data;
   const exMap = Object.fromEntries(exercises.map((e) => [e.id, e]));
-  const t = templates.find((x) => x.id === editing);
-  if (t) return <TemplateEditor t={t} exercises={exercises} exMap={exMap} onBack={() => setEditing(null)} />;
+  const plan = plans.find((p) => p.id === planId);
+  const workout = templates.find((t) => t.id === workoutId);
+
+  if (plan && workout) return <TemplateEditor t={workout} planName={plan.name} exercises={exercises} exMap={exMap} onBack={() => setWorkoutId(null)} />;
+  if (plan)
+    return (
+      <PlanEditor
+        plan={plan}
+        active={plan.id === activeId}
+        canDelete={plans.length > 1}
+        templates={templates.filter((t) => t.programId === plan.id).sort((a, b) => a.order - b.order)}
+        exMap={exMap}
+        onOpenWorkout={setWorkoutId}
+        onBack={() => setPlanId(null)}
+      />
+    );
+  if (creating) return <NewPlan plans={plans} activeId={activeId} onCancel={() => setCreating(false)} onCreated={(id) => (setCreating(false), setPlanId(id))} />;
+
   return (
     <div className="flex flex-col gap-2">
-      {templates.map((x) => (
-        <button key={x.id} type="button" onClick={() => setEditing(x.id)} className="rounded-2xl bg-neutral-900 p-4 text-left active:bg-neutral-800">
-          <div className="font-semibold">{x.name}</div>
-          <div className="text-sm text-neutral-400">{x.exercises.map((p) => exMap[p.exerciseId]?.name).join(' · ')}</div>
-        </button>
-      ))}
-      <Button
-        onClick={async () => {
-          const id = `tpl_${Date.now()}`;
-          await db.templates.add({ id, name: 'New template', order: templates.length, exercises: [] });
-          setEditing(id);
-        }}
-      >
-        + New template
+      <p className="text-sm text-neutral-400">The active plan drives the whole app: the workouts you can start, the rotation, and your weekly session target.</p>
+      {plans.map((p) => {
+        const ts = templates.filter((t) => t.programId === p.id).sort((a, b) => a.order - b.order);
+        const on = p.id === activeId;
+        return (
+          <button
+            key={p.id}
+            type="button"
+            onClick={() => setPlanId(p.id)}
+            className={cx('rounded-2xl p-4 text-left', on ? 'bg-neutral-900 ring-2 ring-red-600' : 'bg-neutral-900 active:bg-neutral-800')}
+          >
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-lg font-semibold">{p.name}</span>
+              {on && <span className="rounded-full bg-red-600 px-2 py-0.5 text-xs font-semibold">Active</span>}
+            </div>
+            <div className="text-sm text-neutral-400">
+              {ts.length} workout{ts.length === 1 ? '' : 's'} · {p.sessionsPerWeek}/week{ts.length ? ` · ${ts.map((t) => t.name).join(', ')}` : ''}
+            </div>
+          </button>
+        );
+      })}
+      <Button variant="primary" onClick={() => setCreating(true)}>
+        + New plan
       </Button>
     </div>
   );
 }
 
-function TemplateEditor({ t, exercises, exMap, onBack }: { t: Template; exercises: Exercise[]; exMap: Record<string, Exercise>; onBack: () => void }) {
+function NewPlan({ plans, activeId, onCancel, onCreated }: { plans: Program[]; activeId?: string; onCancel: () => void; onCreated: (id: string) => void }) {
+  const [name, setName] = useState('');
+  const [from, setFrom] = useState<string>('');
+  return (
+    <Card className="flex flex-col gap-3">
+      <SectionTitle>New plan</SectionTitle>
+      <label className="flex flex-col gap-1">
+        <span className="text-xs text-neutral-400">Name</span>
+        <input autoFocus value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Fight camp, 3-day maintenance" className="h-12 rounded-xl bg-neutral-800 px-3 outline-none focus:ring-2 focus:ring-red-600" />
+      </label>
+      <label className="flex flex-col gap-1">
+        <span className="text-xs text-neutral-400">Start from</span>
+        <select value={from} onChange={(e) => setFrom(e.target.value)} className="h-12 rounded-xl bg-neutral-800 px-3">
+          <option value="">Blank — I'll add workouts</option>
+          {plans.map((p) => (
+            <option key={p.id} value={p.id}>
+              Copy of {p.name}
+              {p.id === activeId ? ' (current)' : ''}
+            </option>
+          ))}
+        </select>
+      </label>
+      <p className="text-sm text-neutral-400">The new plan becomes active straight away. Your logged workouts and progress stay as they are.</p>
+      <div className="flex gap-2">
+        <Button className="flex-1" onClick={onCancel}>
+          Cancel
+        </Button>
+        <Button variant="primary" className="flex-1" disabled={!name.trim()} onClick={async () => onCreated(await createPlan(name, from || undefined))}>
+          Create &amp; use
+        </Button>
+      </div>
+    </Card>
+  );
+}
+
+function PlanEditor({
+  plan,
+  active,
+  canDelete,
+  templates,
+  exMap,
+  onOpenWorkout,
+  onBack,
+}: {
+  plan: Program;
+  active: boolean;
+  canDelete: boolean;
+  templates: Template[];
+  exMap: Record<string, Exercise>;
+  onOpenWorkout: (id: string) => void;
+  onBack: () => void;
+}) {
+  const save = (patch: Partial<Program>) => db.programs.put({ ...plan, ...patch });
+  return (
+    <div className="flex flex-col gap-3">
+      <Button variant="ghost" className="self-start" onClick={onBack}>
+        ‹ All plans
+      </Button>
+      {active ? (
+        <div className="rounded-xl bg-red-950/60 px-4 py-3 text-sm font-semibold text-red-200">Active plan — this is what the app is showing</div>
+      ) : (
+        <Button variant="primary" className="h-14 text-lg" onClick={() => setActivePlan(plan.id)}>
+          Use this plan
+        </Button>
+      )}
+      <Card className="flex flex-col gap-3">
+        <TextField key={plan.id} label="Plan name" value={plan.name} onChange={(name) => name.trim() && save({ name: name.trim() })} />
+        <NumberField label="Weight sessions per week (target)" value={plan.sessionsPerWeek} onChange={(v) => v && save({ sessionsPerWeek: Math.round(v) })} />
+      </Card>
+      <SectionTitle>Workouts (in rotation order)</SectionTitle>
+      {templates.map((t, i) => (
+        <Card key={t.id} className="flex items-center gap-2 p-2 pl-4">
+          <button type="button" className="min-h-12 min-w-0 flex-1 text-left" onClick={() => onOpenWorkout(t.id)}>
+            <div className="font-semibold">
+              {i + 1}. {t.name}
+            </div>
+            <div className="truncate text-sm text-neutral-400">{t.exercises.length ? t.exercises.map((p) => exMap[p.exerciseId]?.name).join(' · ') : 'No exercises yet'}</div>
+          </button>
+          <Button aria-label={`move ${t.name} up`} className="w-12 px-0" disabled={i === 0} onClick={() => moveWorkout(plan.id, t.id, -1)}>
+            ↑
+          </Button>
+          <Button aria-label={`move ${t.name} down`} className="w-12 px-0" disabled={i === templates.length - 1} onClick={() => moveWorkout(plan.id, t.id, 1)}>
+            ↓
+          </Button>
+        </Card>
+      ))}
+      <Button onClick={async () => onOpenWorkout(await addWorkout(plan.id))}>+ Add workout</Button>
+      <Button
+        variant="danger"
+        disabled={!canDelete}
+        onClick={async () => {
+          if (!confirm(`Delete plan "${plan.name}" and its ${templates.length} workout(s)? Your logged history is kept.`)) return;
+          await deletePlan(plan.id);
+          onBack();
+        }}
+      >
+        {canDelete ? 'Delete plan' : "Can't delete your only plan"}
+      </Button>
+    </div>
+  );
+}
+
+function TemplateEditor({ t, planName, exercises, exMap, onBack }: { t: Template; planName: string; exercises: Exercise[]; exMap: Record<string, Exercise>; onBack: () => void }) {
   const [adding, setAdding] = useState('');
   const save = (patch: Partial<Template>) => db.templates.put({ ...t, ...patch });
   const setRx = (i: number, patch: Partial<Prescription>) => save({ exercises: t.exercises.map((p, j) => (j === i ? { ...p, ...patch } : p)) });
@@ -90,10 +219,10 @@ function TemplateEditor({ t, exercises, exMap, onBack }: { t: Template; exercise
   return (
     <div className="flex flex-col gap-3">
       <Button variant="ghost" className="self-start" onClick={onBack}>
-        ‹ All templates
+        ‹ {planName}
       </Button>
       <Card className="flex flex-col gap-3">
-        <TextField label="Name" value={t.name} onChange={(name) => save({ name })} />
+        <TextField key={t.id} label="Workout name" value={t.name} onChange={(name) => save({ name })} />
         <TextField label="Conditioning (shown at end of workout)" value={t.conditioning?.label ?? ''} onChange={(label) => save({ conditioning: label ? { kind: t.conditioning?.kind ?? 'zone2', label } : undefined })} />
         {t.conditioning && (
           <select value={t.conditioning.kind} onChange={(e) => save({ conditioning: { ...t.conditioning!, kind: e.target.value as 'zone2' } })} className="h-12 rounded-xl bg-neutral-800 px-3">
@@ -153,12 +282,12 @@ function TemplateEditor({ t, exercises, exMap, onBack }: { t: Template; exercise
       <Button
         variant="danger"
         onClick={async () => {
-          if (!confirm(`Delete template "${t.name}"? Logged workouts are kept.`)) return;
+          if (!confirm(`Delete workout "${t.name}" from this plan? Logged workouts are kept.`)) return;
           await db.templates.delete(t.id);
           onBack();
         }}
       >
-        Delete template
+        Delete workout
       </Button>
     </div>
   );
@@ -290,10 +419,8 @@ function TargetsEditor({ s }: { s: Settings }) {
         <RangeField label="Water" unit="L" r={T.weekly.water} onChange={w('water')} />
         <RangeField label="Zone 2" unit="min" r={T.weekly.zone2Min} onChange={w('zone2Min')} />
         <RangeField label="Martial arts sessions" r={T.weekly.maSessions} onChange={w('maSessions')} />
-        <div className="grid grid-cols-2 gap-2">
-          <NumberField label="Sprint sessions" value={T.weekly.sprintSessions} onChange={(v) => w('sprintSessions')(v ?? 0)} />
-          <NumberField label="Weight sessions" value={T.weekly.weightSessions} onChange={(v) => w('weightSessions')(v ?? 0)} />
-        </div>
+        <NumberField label="Sprint sessions" value={T.weekly.sprintSessions} onChange={(v) => w('sprintSessions')(v ?? 0)} />
+        <p className="text-xs text-neutral-500">The weekly weight-session target is set per plan, under Plans.</p>
       </Card>
     </>
   );
@@ -341,66 +468,6 @@ function TrainingEditor({ s }: { s: Settings }) {
       )}
       <p className="text-xs text-neutral-500">Units: kg, metres, litres.</p>
     </Card>
-  );
-}
-
-// ------------------------------------------------------------ Fitbit
-
-function FitbitSettings({ s }: { s: Settings }) {
-  const sync = useFitbitSync();
-  const [copied, setCopied] = useState(false);
-  const clientId = s.google?.clientId ?? '';
-  const uri = redirectUri();
-  const origin = window.location.origin;
-  return (
-    <>
-      <Card className="flex flex-col gap-3">
-        <SectionTitle>Fitbit via Google Health</SectionTitle>
-        <p className="text-sm text-neutral-300">
-          Pulls <b>sleep</b> (into check-ins), <b>bodyweight &amp; body fat</b>, and <b>runs</b> (as Zone 2 entries) from your Fitbit through your Google account. Values you typed yourself are never
-          overwritten.
-        </p>
-        <TextField label="Google OAuth client ID" value={clientId} onChange={(v) => saveSettings({ google: { ...s.google, clientId: v.trim() || undefined } })} />
-        <Button variant="primary" className="h-14 text-lg" disabled={!clientId || sync.status === 'syncing'} onClick={() => syncNow('#/settings?tab=fitbit')}>
-          {getToken() ? 'Sync now' : s.google?.lastSync ? 'Sync now (sign in)' : 'Connect Google & sync'}
-        </Button>
-        <FitbitStatus s={s} />
-        {getToken() && (
-          <Button
-            variant="ghost"
-            onClick={() => {
-              clearToken();
-              location.reload();
-            }}
-          >
-            Sign out of Google
-          </Button>
-        )}
-      </Card>
-      <Card className="flex flex-col gap-2 text-sm">
-        <SectionTitle>Your app's addresses (for Google Cloud setup)</SectionTitle>
-        <div>
-          <div className="text-xs text-neutral-400">Authorized JavaScript origin</div>
-          <code className="break-all">{origin}</code>
-        </div>
-        <div>
-          <div className="text-xs text-neutral-400">Authorized redirect URI</div>
-          <code className="break-all">{uri}</code>
-        </div>
-        <Button
-          onClick={async () => {
-            await navigator.clipboard?.writeText(uri);
-            setCopied(true);
-          }}
-        >
-          {copied ? 'Copied ✓' : 'Copy redirect URI'}
-        </Button>
-        <p className="text-neutral-400">
-          Sync runs when you tap it, and automatically when you open the app while still signed in (Google sign-ins last about an hour). Runs are recorded as RUNNING, TREADMILL, TRAIL_RUN or
-          INCLINE_RUN in Fitbit.
-        </p>
-      </Card>
-    </>
   );
 }
 
